@@ -1,7 +1,21 @@
-#include <raylib.h>
 #include <stdbool.h>
 
-void DrawNumber(int number, int midX, int midY, Color color, Font font, int fontSize);
+typedef struct {
+  bool pencilMarks[9];
+  bool given;
+  int number;
+} Cell;
+
+typedef struct {
+  Cell cells[9][9];
+  int solution[9][9];
+  int selectedNumber;
+} Board;
+
+bool BoardIsNumberComplete(Board *b, int number);
+void BoardUpdateNumber(Board *b, int number);
+void BoardInit(Board *board, const char *string);
+
 void render(void);
 void printBoard(int board[9][9]);
 void solve(int board[9][9]);
