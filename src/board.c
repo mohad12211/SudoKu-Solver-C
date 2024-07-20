@@ -1,6 +1,7 @@
+#define _GNU_SOURCE
 #include "board.h"
 #include <stdio.h>
-#include <stdlib.h>
+#include <string.h>
 
 // TODO: Handle invalid strings.
 void BoardInit(Board *board, const char *string) {
@@ -14,6 +15,25 @@ void BoardInit(Board *board, const char *string) {
     }
   }
   solve(board->solution);
+}
+
+void setNewBoard(Board *board) {
+  FILE *fd;
+  char line[512];
+  char *str;
+  // easy
+  // medium
+  // hard
+  // expert
+  // evil
+  // extreme
+  fd = popen("curl https://sudoku.com/api/v2/level/extreme  -H 'X-Requested-With: XMLHttpRequest' 2> /dev/null", "r");
+  fgets(line, sizeof(line), fd);
+  str = strstr(line, "mission\":\"") + strlen("mission\":\"");
+  str[81] = '\0';
+  printf("%s\n", str);
+  BoardInit(board, str);
+  pclose(fd);
 }
 
 void BoardUpdateNumber(Board *b, int number) { b->selectedNumber = number; }

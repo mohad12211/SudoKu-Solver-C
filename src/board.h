@@ -12,6 +12,7 @@ typedef struct {
   int selectedNumber;
 } Board;
 
+void setNewBoard(Board *board);
 bool BoardIsNumberComplete(Board *b, int number);
 void BoardUpdateNumber(Board *b, int number);
 void BoardInit(Board *board, const char *string);
