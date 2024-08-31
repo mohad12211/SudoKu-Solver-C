@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "board.h"
+#include <raylib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -17,17 +18,11 @@ void BoardInit(Board *board, const char *string) {
   solve(board->solution);
 }
 
-void setNewBoard(Board *board) {
+void setNewBoard(Board *board, char *difficulty) {
   FILE *fd;
   char line[512];
   char *str;
-  // easy
-  // medium
-  // hard
-  // expert
-  // evil
-  // extreme
-  fd = popen("curl https://sudoku.com/api/v2/level/extreme  -H 'X-Requested-With: XMLHttpRequest' 2> /dev/null", "r");
+  fd = popen(TextFormat("curl https://sudoku.com/api/v2/level/%s -H 'X-Requested-With: XMLHttpRequest' 2> /dev/null", difficulty), "r");
   fgets(line, sizeof(line), fd);
   str = strstr(line, "mission\":\"") + strlen("mission\":\"");
   str[81] = '\0';
@@ -174,4 +169,22 @@ void printBoard(int board[9][9]) {
     }
     printf("\n");
   }
+}
+
+char *getDiffFromInt(int difficulty) {
+  switch (difficulty) {
+  case 0:
+    return "easy";
+  case 1:
+    return "medium";
+  case 2:
+    return "hard";
+  case 3:
+    return "expert";
+  case 4:
+    return "evil";
+  case 5:
+    return "extreme";
+  }
+  return 0;
 }

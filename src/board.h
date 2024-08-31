@@ -12,7 +12,7 @@ typedef struct {
   int selectedNumber;
 } Board;
 
-void setNewBoard(Board *board);
+void setNewBoard(Board *board, char *difficulty);
 bool BoardIsNumberComplete(Board *b, int number);
 void BoardUpdateNumber(Board *b, int number);
 void BoardInit(Board *board, const char *string);
@@ -24,3 +24,4 @@ bool compare(int puzzle[9][9], int solution[9][9]);
 bool solveRecursive(int board[9][9], int startRow, int startColumn);
 bool isValid(int board[9][9]);
 bool getNextEmptyCell(int board[9][9], int *currentRow, int *currentColumn);
+char *getDiffFromInt(int difficulty);

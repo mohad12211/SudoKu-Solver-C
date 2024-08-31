@@ -21,6 +21,7 @@
 #define PENCIL_NUMBER_FONT_SIZE (HEIGHT / 25.)
 // TODO: calculate it better
 #define TIME_FONT_SIZE 70
+#define TEXT_FONT_SIZE 63
 
 #define COLUMN_TO_X(column) ((column) * (GRID_SIZE + GRID_PADDING) + BOARD_PADDING_X)
 #define ROW_TO_Y(row) ((row) * (GRID_SIZE + GRID_PADDING) + BOARD_PADDING_Y)
@@ -52,15 +53,17 @@ void render(void) {
   Font numberFont = LoadFontEx("DroidSans.ttf", NUMBER_FONT_SIZE, NULL, 0);
   Font pencilFont = LoadFontEx("DroidSans.ttf", PENCIL_NUMBER_FONT_SIZE, NULL, 0);
   Font timeFont = LoadFontEx("DroidSans.ttf", TIME_FONT_SIZE, NULL, 0);
+  Font textFont = LoadFontEx("DroidSans.ttf", TEXT_FONT_SIZE, NULL, 0);
   bool pencilMode = false;
   float time = 0.0;
+  int difficulty = 0;
 
   while (!WindowShouldClose()) {
     BeginDrawing();
     ClearBackground(BACKGROUND_COLOR);
 
     if (GetKeyPressed() == KEY_ENTER) {
-      setNewBoard(&board);
+      setNewBoard(&board, getDiffFromInt(difficulty));
       time = 0;
     }
     // Update selected cell.
@@ -164,17 +167,33 @@ void render(void) {
       }
     }
 
-    if (IsWindowFocused()) {
-      time += GetFrameTime();
+    {
+      if (IsWindowFocused()) {
+        time += GetFrameTime();
+      }
+      int hours = (int)time / 3600;
+      int minutes = ((int)time % 3600) / 60;
+      int secs = (int)time % 60;
+      const char *text = TextFormat("%02d:%02d:%02d", hours, minutes, secs);
+      const Vector2 measure = MeasureTextEx(timeFont, text, TIME_FONT_SIZE, 0);
+      const Rectangle rec = {850 + 1, 300, SQUARE_SIZE * 3 - 4, measure.y};
+      DrawTextEx(timeFont, text, (Vector2){rec.x + ((rec.width - measure.x) / 2.0), 300}, TIME_FONT_SIZE, 0, CORRECT_CELL_COLOR);
+      DrawRectangleLinesEx(rec, GRID_PADDING, GRID_LINES_COLOR);
     }
-    int hours = (int)time / 3600;
-    int minutes = ((int)time % 3600) / 60;
-    int secs = (int)time % 60;
-    const char *text = TextFormat("%02d:%02d:%02d", hours, minutes, secs);
-    const Vector2 measure = MeasureTextEx(timeFont, text, TIME_FONT_SIZE, 0);
-    const Rectangle rec = {850 + 1, 300, SQUARE_SIZE * 3 - 4, measure.y};
-    DrawTextEx(timeFont, text, (Vector2){rec.x + ((rec.width - measure.x) / 2.0), 300}, TIME_FONT_SIZE, 0, CORRECT_CELL_COLOR);
-    DrawRectangleLinesEx(rec, GRID_PADDING, GRID_LINES_COLOR);
+
+    for (int i = 0; i <= 5; i++) {
+      const char *text = getDiffFromInt(i);
+      const Vector2 measure = MeasureTextEx(textFont, text, TEXT_FONT_SIZE, 0);
+      const Rectangle rec = {850 + 1, 400 + measure.y * i - i * 2, SQUARE_SIZE * 3 - 4, measure.y};
+      if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(GetMousePosition(), rec)) {
+        difficulty = i;
+      }
+      if (difficulty == i) {
+        DrawRectangleRec(rec, SELECTED_PENCIL_COLOR);
+      }
+      DrawRectangleLinesEx(rec, GRID_PADDING, GRID_LINES_COLOR);
+      DrawTextEx(textFont, text, (Vector2){rec.x + ((rec.width - measure.x) / 2.0), rec.y}, TEXT_FONT_SIZE, 0, CORRECT_CELL_COLOR);
+    }
 
     EndDrawing();
   }
