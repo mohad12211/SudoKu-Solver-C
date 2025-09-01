@@ -1,8 +1,6 @@
 #include "main.h"
-#include "board.h"
 #include <raylib.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <string.h>
 
 #define WIDTH 1150
@@ -22,6 +20,8 @@
 // TODO: calculate it better
 #define TIME_FONT_SIZE 70
 #define TEXT_FONT_SIZE 63
+#define WIN_FONT_SIZE 120
+#define WIN_SUBTITLE_SIZE 40
 
 #define COLUMN_TO_X(column) ((column) * (GRID_SIZE + GRID_PADDING) + BOARD_PADDING_X)
 #define ROW_TO_Y(row) ((row) * (GRID_SIZE + GRID_PADDING) + BOARD_PADDING_Y)
@@ -36,6 +36,8 @@
 #define WRONG_CELL_COLOR (RED)
 #define BACKGROUND_COLOR ((Color){55, 55, 66, 255})
 #define GRID_LINES_COLOR (BLACK)
+#define WIN_COLOR ((Color){50, 205, 50, 255})
+#define WIN_BACKGROUND ((Color){0, 0, 0, 180})
 
 int main(void) {
   SetTraceLogLevel(LOG_WARNING);
@@ -48,15 +50,75 @@ int main(void) {
   return 0;
 }
 
+bool IsPuzzleComplete(Board *board) {
+  // Check if all cells are filled and correct
+  for (int row = 0; row < 9; row++) {
+    for (int column = 0; column < 9; column++) {
+      Cell *cell = &board->cells[row][column];
+      if (cell->number == 0 || cell->number != board->solution[row][column]) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+void DrawWinningScreen(Font winFont, Font subtitleFont, float completionTime, int difficulty) {
+  // Semi-transparent overlay
+  DrawRectangle(0, 0, WIDTH, HEIGHT, WIN_BACKGROUND);
+
+  // Main congratulations text
+  const char *winText = "CONGRATULATIONS!";
+  Vector2 winTextSize = MeasureTextEx(winFont, winText, WIN_FONT_SIZE, 0);
+  float winTextX = (WIDTH - winTextSize.x) / 2.0f;
+  float winTextY = HEIGHT / 3.0f;
+  DrawTextEx(winFont, winText, (Vector2){winTextX, winTextY}, WIN_FONT_SIZE, 0, WIN_COLOR);
+
+  // Completion message
+  const char *completeText = "Puzzle Solved!";
+  Vector2 completeTextSize = MeasureTextEx(subtitleFont, completeText, WIN_SUBTITLE_SIZE, 0);
+  float completeTextX = (WIDTH - completeTextSize.x) / 2.0f;
+  float completeTextY = winTextY + winTextSize.y + 20;
+  DrawTextEx(subtitleFont, completeText, (Vector2){completeTextX, completeTextY}, WIN_SUBTITLE_SIZE, 0, CORRECT_CELL_COLOR);
+
+  // Time and difficulty info
+  int hours = (int)completionTime / 3600;
+  int minutes = ((int)completionTime % 3600) / 60;
+  int secs = (int)completionTime % 60;
+  const char *timeText = TextFormat("Time: %02d:%02d:%02d", hours, minutes, secs);
+  Vector2 timeTextSize = MeasureTextEx(subtitleFont, timeText, WIN_SUBTITLE_SIZE, 0);
+  float timeTextX = (WIDTH - timeTextSize.x) / 2.0f;
+  float timeTextY = completeTextY + completeTextSize.y + 15;
+  DrawTextEx(subtitleFont, timeText, (Vector2){timeTextX, timeTextY}, WIN_SUBTITLE_SIZE, 0, CORRECT_CELL_COLOR);
+
+  const char *diffText = TextFormat("Difficulty: %s", getDiffFromInt(difficulty));
+  Vector2 diffTextSize = MeasureTextEx(subtitleFont, diffText, WIN_SUBTITLE_SIZE, 0);
+  float diffTextX = (WIDTH - diffTextSize.x) / 2.0f;
+  float diffTextY = timeTextY + timeTextSize.y + 15;
+  DrawTextEx(subtitleFont, diffText, (Vector2){diffTextX, diffTextY}, WIN_SUBTITLE_SIZE, 0, CORRECT_CELL_COLOR);
+
+  // Instructions
+  const char *instructText = "Press ENTER for new puzzle or ESC to exit";
+  Vector2 instructTextSize = MeasureTextEx(subtitleFont, instructText, WIN_SUBTITLE_SIZE - 10, 0);
+  float instructTextX = (WIDTH - instructTextSize.x) / 2.0f;
+  float instructTextY = diffTextY + diffTextSize.y + 40;
+  DrawTextEx(subtitleFont, instructText, (Vector2){instructTextX, instructTextY}, WIN_SUBTITLE_SIZE - 10, 0, GIVEN_CELL_COLOR);
+}
+
 void render(void) {
   Board board = {.selectedNumber = -1};
   Font numberFont = LoadFontEx("DroidSans.ttf", NUMBER_FONT_SIZE, NULL, 0);
   Font pencilFont = LoadFontEx("DroidSans.ttf", PENCIL_NUMBER_FONT_SIZE, NULL, 0);
   Font timeFont = LoadFontEx("DroidSans.ttf", TIME_FONT_SIZE, NULL, 0);
   Font textFont = LoadFontEx("DroidSans.ttf", TEXT_FONT_SIZE, NULL, 0);
+  Font winFont = LoadFontEx("DroidSans.ttf", WIN_FONT_SIZE, NULL, 0);
+  Font subtitleFont = LoadFontEx("DroidSans.ttf", WIN_SUBTITLE_SIZE, NULL, 0);
+
   bool pencilMode = false;
   float time = 0.0;
   int difficulty = 0;
+  bool puzzleCompleted = false;
+  float completionTime = 0.0;
 
   while (!WindowShouldClose()) {
     BeginDrawing();
@@ -65,53 +127,68 @@ void render(void) {
     if (GetKeyPressed() == KEY_ENTER) {
       setNewBoard(&board, difficulty + 5);
       time = 0;
+      puzzleCompleted = false;
+      completionTime = 0.0;
     }
-    // Update selected cell.
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-      int selectedColumn = X_TO_COLUMN(GetMouseX());
-      int selectedRow = Y_TO_ROW(GetMouseY());
-      if (selectedColumn >= 10 && selectedColumn <= 12 && selectedRow <= 2 && selectedRow >= 0) {
-        if (board.selectedNumber == (selectedRow * 3 + (selectedColumn - 9))) {
-          BoardUpdateNumber(&board, -1);
+
+    if (GetKeyPressed() == KEY_ESCAPE && puzzleCompleted) {
+      break; // Exit the game
+    }
+
+    if (!puzzleCompleted) {
+      // Update selected cell.
+      if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        int selectedColumn = X_TO_COLUMN(GetMouseX());
+        int selectedRow = Y_TO_ROW(GetMouseY());
+        if (selectedColumn >= 10 && selectedColumn <= 12 && selectedRow <= 2 && selectedRow >= 0) {
+          if (board.selectedNumber == (selectedRow * 3 + (selectedColumn - 9))) {
+            BoardUpdateNumber(&board, -1);
+          } else {
+            BoardUpdateNumber(&board, selectedRow * 3 + (selectedColumn - 9));
+          }
         } else {
-          BoardUpdateNumber(&board, selectedRow * 3 + (selectedColumn - 9));
-        }
-      } else {
-        if (board.selectedNumber != -1) {
-          if (selectedColumn >= 0 && selectedColumn <= 8 && selectedRow >= 0 && selectedRow <= 8) {
-            Cell *cell = &board.cells[selectedRow][selectedColumn];
-            if (pencilMode) {
-              cell->pencilMarks[board.selectedNumber - 1] = !cell->pencilMarks[board.selectedNumber - 1];
-            } else if (cell->number && !cell->given) {
-              cell->number = 0;
-            } else if (!cell->given) {
-              cell->number = board.selectedNumber;
-              bool isCorrect = cell->number == board.solution[selectedRow][selectedColumn];
-              if (isCorrect) {
-                for (int row = 0; row < 9; row++) {
-                  if (board.cells[row][selectedColumn].pencilMarks[board.selectedNumber - 1]) {
-                    board.cells[row][selectedColumn].pencilMarks[board.selectedNumber - 1] = false;
-                  }
-                }
-                for (int column = 0; column < 9; column++) {
-                  if (board.cells[selectedRow][column].pencilMarks[board.selectedNumber - 1]) {
-                    board.cells[selectedRow][column].pencilMarks[board.selectedNumber - 1] = false;
-                  }
-                }
-                for (int subcolumn = (selectedColumn / 3) * 3; subcolumn < (selectedColumn / 3) * 3 + 3; subcolumn++) {
-                  for (int subrow = (selectedRow / 3) * 3; subrow < (selectedRow / 3) * 3 + 3; subrow++) {
-                    if (board.cells[subrow][subcolumn].pencilMarks[board.selectedNumber - 1]) {
-                      board.cells[subrow][subcolumn].pencilMarks[board.selectedNumber - 1] = false;
+          if (board.selectedNumber != -1) {
+            if (selectedColumn >= 0 && selectedColumn <= 8 && selectedRow >= 0 && selectedRow <= 8) {
+              Cell *cell = &board.cells[selectedRow][selectedColumn];
+              if (pencilMode) {
+                cell->pencilMarks[board.selectedNumber - 1] = !cell->pencilMarks[board.selectedNumber - 1];
+              } else if (cell->number && !cell->given) {
+                cell->number = 0;
+              } else if (!cell->given) {
+                cell->number = board.selectedNumber;
+                bool isCorrect = cell->number == board.solution[selectedRow][selectedColumn];
+                if (isCorrect) {
+                  for (int row = 0; row < 9; row++) {
+                    if (board.cells[row][selectedColumn].pencilMarks[board.selectedNumber - 1]) {
+                      board.cells[row][selectedColumn].pencilMarks[board.selectedNumber - 1] = false;
                     }
                   }
+                  for (int column = 0; column < 9; column++) {
+                    if (board.cells[selectedRow][column].pencilMarks[board.selectedNumber - 1]) {
+                      board.cells[selectedRow][column].pencilMarks[board.selectedNumber - 1] = false;
+                    }
+                  }
+                  for (int subcolumn = (selectedColumn / 3) * 3; subcolumn < (selectedColumn / 3) * 3 + 3; subcolumn++) {
+                    for (int subrow = (selectedRow / 3) * 3; subrow < (selectedRow / 3) * 3 + 3; subrow++) {
+                      if (board.cells[subrow][subcolumn].pencilMarks[board.selectedNumber - 1]) {
+                        board.cells[subrow][subcolumn].pencilMarks[board.selectedNumber - 1] = false;
+                      }
+                    }
+                  }
+                }
+
+                // Check if puzzle is completed after placing a number
+                if (IsPuzzleComplete(&board)) {
+                  puzzleCompleted = true;
+                  completionTime = time;
                 }
               }
             }
           }
         }
+      } else if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+        pencilMode = !pencilMode;
       }
-    } else if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
-      pencilMode = !pencilMode;
     }
 
     for (int i = 0; i < 9; i++) {
@@ -168,7 +245,7 @@ void render(void) {
     }
 
     {
-      if (IsWindowFocused()) {
+      if (IsWindowFocused() && !puzzleCompleted) {
         time += GetFrameTime();
       }
       int hours = (int)time / 3600;
@@ -185,7 +262,7 @@ void render(void) {
       const char *text = getDiffFromInt(i);
       const Vector2 measure = MeasureTextEx(textFont, text, TEXT_FONT_SIZE, 0);
       const Rectangle rec = {850 + 1, 400 + measure.y * i - i * 2, SQUARE_SIZE * 3 - 4, measure.y};
-      if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(GetMousePosition(), rec)) {
+      if (!puzzleCompleted && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(GetMousePosition(), rec)) {
         difficulty = i;
       }
       if (difficulty == i) {
@@ -193,6 +270,11 @@ void render(void) {
       }
       DrawRectangleLinesEx(rec, GRID_PADDING, GRID_LINES_COLOR);
       DrawTextEx(textFont, text, (Vector2){rec.x + ((rec.width - measure.x) / 2.0), rec.y}, TEXT_FONT_SIZE, 0, CORRECT_CELL_COLOR);
+    }
+
+    // Draw winning screen if puzzle is completed
+    if (puzzleCompleted) {
+      DrawWinningScreen(winFont, subtitleFont, completionTime, difficulty);
     }
 
     EndDrawing();

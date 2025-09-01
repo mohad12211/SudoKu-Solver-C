@@ -1,3 +1,4 @@
+#include "board.h"
 #include <raylib.h>
 #include <stdbool.h>
 
@@ -11,3 +12,5 @@ bool compare(int puzzle[9][9], int solution[9][9]);
 bool solveRecursive(int board[9][9], int startRow, int startColumn);
 bool isValid(int board[9][9]);
 bool getNextEmptyCell(int board[9][9], int *currentRow, int *currentColumn);
+bool IsPuzzleComplete(Board *board);
+void DrawWinningScreen(Font winFont, Font subtitleFont, float completionTime, int difficulty);
