@@ -14,3 +14,4 @@ bool isValid(int board[9][9]);
 bool getNextEmptyCell(int board[9][9], int *currentRow, int *currentColumn);
 bool IsPuzzleComplete(Board *board);
 void DrawWinningScreen(Font winFont, Font subtitleFont, float completionTime, int difficulty);
+void DrawPauseScreen(Font pauseFont, Font subtitleFont);

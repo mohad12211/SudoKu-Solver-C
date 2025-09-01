@@ -38,6 +38,8 @@
 #define GRID_LINES_COLOR (BLACK)
 #define WIN_COLOR ((Color){50, 205, 50, 255})
 #define WIN_BACKGROUND ((Color){0, 0, 0, 180})
+#define PAUSE_COLOR ((Color){255, 215, 0, 255})
+#define PAUSE_BACKGROUND ((Color){0, 0, 0, 200})
 
 int main(void) {
   SetTraceLogLevel(LOG_WARNING);
@@ -61,6 +63,25 @@ bool IsPuzzleComplete(Board *board) {
     }
   }
   return true;
+}
+
+void DrawPauseScreen(Font pauseFont, Font subtitleFont) {
+  // Semi-transparent overlay
+  DrawRectangle(0, 0, WIDTH, HEIGHT, PAUSE_BACKGROUND);
+
+  // Main pause text
+  const char *pauseText = "GAME PAUSED";
+  Vector2 pauseTextSize = MeasureTextEx(pauseFont, pauseText, WIN_FONT_SIZE, 0);
+  float pauseTextX = (WIDTH - pauseTextSize.x) / 2.0f;
+  float pauseTextY = HEIGHT / 2.5f;
+  DrawTextEx(pauseFont, pauseText, (Vector2){pauseTextX, pauseTextY}, WIN_FONT_SIZE, 0, PAUSE_COLOR);
+
+  // Instructions
+  const char *instructText = "Click on the window to resume";
+  Vector2 instructTextSize = MeasureTextEx(subtitleFont, instructText, WIN_SUBTITLE_SIZE, 0);
+  float instructTextX = (WIDTH - instructTextSize.x) / 2.0f;
+  float instructTextY = pauseTextY + pauseTextSize.y + 30;
+  DrawTextEx(subtitleFont, instructText, (Vector2){instructTextX, instructTextY}, WIN_SUBTITLE_SIZE, 0, CORRECT_CELL_COLOR);
 }
 
 void DrawWinningScreen(Font winFont, Font subtitleFont, float completionTime, int difficulty) {
@@ -119,8 +140,15 @@ void render(void) {
   int difficulty = 0;
   bool puzzleCompleted = false;
   float completionTime = 0.0;
+  bool isWindowFocused = true;
 
   while (!WindowShouldClose()) {
+    // Check if window focus changed
+    bool currentlyFocused = IsWindowFocused();
+    if (currentlyFocused != isWindowFocused) {
+      isWindowFocused = currentlyFocused;
+    }
+
     BeginDrawing();
     ClearBackground(BACKGROUND_COLOR);
 
@@ -135,7 +163,7 @@ void render(void) {
       break; // Exit the game
     }
 
-    if (!puzzleCompleted) {
+    if (!puzzleCompleted && isWindowFocused) {
       // Update selected cell.
       if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         int selectedColumn = X_TO_COLUMN(GetMouseX());
@@ -245,7 +273,7 @@ void render(void) {
     }
 
     {
-      if (IsWindowFocused() && !puzzleCompleted) {
+      if (isWindowFocused && !puzzleCompleted) {
         time += GetFrameTime();
       }
       int hours = (int)time / 3600;
@@ -262,7 +290,8 @@ void render(void) {
       const char *text = getDiffFromInt(i);
       const Vector2 measure = MeasureTextEx(textFont, text, TEXT_FONT_SIZE, 0);
       const Rectangle rec = {850 + 1, 400 + measure.y * i - i * 2, SQUARE_SIZE * 3 - 4, measure.y};
-      if (!puzzleCompleted && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(GetMousePosition(), rec)) {
+      if (!puzzleCompleted && isWindowFocused && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+          CheckCollisionPointRec(GetMousePosition(), rec)) {
         difficulty = i;
       }
       if (difficulty == i) {
@@ -275,6 +304,10 @@ void render(void) {
     // Draw winning screen if puzzle is completed
     if (puzzleCompleted) {
       DrawWinningScreen(winFont, subtitleFont, completionTime, difficulty);
+    }
+    // Draw pause screen if window is not focused and puzzle is not completed
+    else if (!isWindowFocused) {
+      DrawPauseScreen(winFont, subtitleFont);
     }
 
     EndDrawing();
