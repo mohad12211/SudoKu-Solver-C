@@ -18,13 +18,14 @@ void BoardInit(Board *board, const char *string) {
   solve(board->solution);
 }
 
-void setNewBoard(Board *board, char *difficulty) {
+void setNewBoard(Board *board, int difficulty) {
   FILE *fd;
   char line[512];
   char *str;
-  fd = popen(TextFormat("curl https://sudoku.com/api/v2/level/%s -H 'X-Requested-With: XMLHttpRequest' 2> /dev/null", difficulty), "r");
+  printf("Fetching new board with difficulty %d...\n", difficulty);
+  fd = popen(TextFormat("curl https://sudoku.coach/beapi/get-puzzles/quick_puzzle_sudoku/%d/1  2> /dev/null", difficulty), "r");
   fgets(line, sizeof(line), fd);
-  str = strstr(line, "mission\":\"") + strlen("mission\":\"");
+  str = strstr(line, "puzzle\":\"") + strlen("puzzle\":\"");
   str[81] = '\0';
   printf("%s\n", str);
   BoardInit(board, str);

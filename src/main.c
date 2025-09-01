@@ -63,7 +63,7 @@ void render(void) {
     ClearBackground(BACKGROUND_COLOR);
 
     if (GetKeyPressed() == KEY_ENTER) {
-      setNewBoard(&board, getDiffFromInt(difficulty));
+      setNewBoard(&board, difficulty + 5);
       time = 0;
     }
     // Update selected cell.
