@@ -1,4 +1,5 @@
 #include "main.h"
+#include <math.h>
 #include <raylib.h>
 #include <stdbool.h>
 #include <string.h>
@@ -47,6 +48,7 @@ static bool MoveStackPop(MoveStack *s, MoveEntry *out) {
 #define TEXT_FONT_SIZE 63
 #define WIN_FONT_SIZE 120
 #define WIN_SUBTITLE_SIZE 40
+#define WIN_INSTRUCTION_SIZE 30
 
 #define COLUMN_TO_X(column) ((column) * (GRID_SIZE + GRID_PADDING) + BOARD_PADDING_X)
 #define ROW_TO_Y(row) ((row) * (GRID_SIZE + GRID_PADDING) + BOARD_PADDING_Y)
@@ -65,6 +67,169 @@ static bool MoveStackPop(MoveStack *s, MoveEntry *out) {
 #define WIN_BACKGROUND ((Color){0, 0, 0, 180})
 #define PAUSE_COLOR ((Color){255, 215, 0, 255})
 #define PAUSE_BACKGROUND ((Color){0, 0, 0, 200})
+
+// ─── Win Animation ──────────────────────────────────────────────────────────
+
+// Confetti particle system
+#define MAX_PARTICLES 250
+#define PARTICLE_SPAWN_INTERVAL 0.035f  // spawn burst every ~35ms
+#define PARTICLE_SPAWN_DURATION 3.5f    // keep spawning for this many seconds
+
+// Cell ripple flash
+#define FLASH_SPREAD_SPEED 5.5f  // cells/second, controls how fast the wave travels
+#define FLASH_DURATION     0.55f // seconds each cell stays lit during the flash
+
+// Overlay fade-in
+#define OVERLAY_FADE_START    1.8f // seconds after win before the overlay appears
+#define OVERLAY_FADE_DURATION 1.0f // seconds for overlay to reach full opacity
+
+typedef struct {
+  Vector2 pos;
+  Vector2 vel;
+  Color color;
+  float rot;
+  float rotSpeed;
+  float w, h;   // rectangle dimensions
+  float life;   // remaining life (0 = dead)
+  float maxLife;
+} Particle;
+
+typedef struct {
+  bool active;
+  float timer;                    // seconds since animation started
+  Particle particles[MAX_PARTICLES];
+  float spawnTimer;
+  float overlayAlpha;             // 0.0 (transparent) → 1.0 (fully opaque)
+} WinAnimation;
+
+static Color CONFETTI_COLORS[] = {
+    {255, 87,  87,  255}, // red
+    {255, 165, 0,   255}, // orange
+    {255, 215, 0,   255}, // gold
+    {87,  230, 87,  255}, // green
+    {87,  200, 255, 255}, // sky blue
+    {180, 87,  255, 255}, // purple
+    {255, 87,  200, 255}, // pink
+    {255, 255, 87,  255}, // yellow
+};
+#define CONFETTI_COLOR_COUNT 8
+
+// Find an inactive particle slot and initialise it at the top of the screen.
+static void SpawnParticle(WinAnimation *anim) {
+  for (int i = 0; i < MAX_PARTICLES; i++) {
+    Particle *p = &anim->particles[i];
+    if (p->life <= 0.0f) {
+      p->pos      = (Vector2){(float)GetRandomValue(0, WIDTH), -10.0f};
+      p->vel      = (Vector2){(float)GetRandomValue(-60, 60),
+                              (float)GetRandomValue(120, 240)};
+      p->color    = CONFETTI_COLORS[GetRandomValue(0, CONFETTI_COLOR_COUNT - 1)];
+      p->rot      = (float)GetRandomValue(0, 360);
+      p->rotSpeed = (float)GetRandomValue(-360, 360);
+      p->w        = (float)GetRandomValue(6, 16);
+      p->h        = (float)GetRandomValue(4, 10);
+      p->maxLife  = (float)GetRandomValue(200, 400) / 100.0f;
+      p->life     = p->maxLife;
+      return;
+    }
+  }
+}
+
+static void InitWinAnimation(WinAnimation *anim) {
+  anim->active       = true;
+  anim->timer        = 0.0f;
+  anim->spawnTimer   = 0.0f;
+  anim->overlayAlpha = 0.0f;
+  for (int i = 0; i < MAX_PARTICLES; i++) {
+    anim->particles[i].life = 0.0f;
+  }
+}
+
+static void UpdateWinAnimation(WinAnimation *anim, float dt) {
+  if (!anim->active) return;
+
+  anim->timer += dt;
+
+  // Spawn two confetti particles per interval for visual density
+  if (anim->timer < PARTICLE_SPAWN_DURATION) {
+    anim->spawnTimer += dt;
+    while (anim->spawnTimer >= PARTICLE_SPAWN_INTERVAL) {
+      SpawnParticle(anim);
+      SpawnParticle(anim);
+      anim->spawnTimer -= PARTICLE_SPAWN_INTERVAL;
+    }
+  }
+
+  // Integrate particles
+  for (int i = 0; i < MAX_PARTICLES; i++) {
+    Particle *p = &anim->particles[i];
+    if (p->life <= 0.0f) continue;
+
+    p->life   -= dt;
+    p->pos.x  += p->vel.x * dt;
+    p->pos.y  += p->vel.y * dt;
+    p->vel.y  += 80.0f * dt; // gravity
+    // Per-particle gentle lateral drift using a staggered sine wave
+    p->vel.x  += sinf(anim->timer * 3.0f + (float)i * 0.5f) * 10.0f * dt;
+    p->rot    += p->rotSpeed * dt;
+
+    if (p->pos.y > HEIGHT + 20.0f) {
+      p->life = 0.0f; // cull off-screen particles
+    }
+  }
+
+  // Smoothly fade the win overlay in after OVERLAY_FADE_START seconds
+  if (anim->timer > OVERLAY_FADE_START) {
+    float t = (anim->timer - OVERLAY_FADE_START) / OVERLAY_FADE_DURATION;
+    if (t > 1.0f) t = 1.0f;
+    anim->overlayAlpha = t;
+  }
+}
+
+// Gold sine-wave ripple emanating outward from the center cell (4,4)
+static void DrawCellFlashes(WinAnimation *anim) {
+  if (!anim->active) return;
+
+  for (int row = 0; row < 9; row++) {
+    for (int col = 0; col < 9; col++) {
+      float dr   = (float)(row - 4);
+      float dc   = (float)(col - 4);
+      float dist = sqrtf(dr * dr + dc * dc);
+      float delay = dist / FLASH_SPREAD_SPEED;
+      float t     = anim->timer - delay;
+
+      if (t < 0.0f || t > FLASH_DURATION) continue;
+
+      // Sine envelope → smooth ramp-up and ramp-down
+      float alpha = sinf((t / FLASH_DURATION) * PI);
+      Color flash = {255, 215, 80, (unsigned char)(alpha * 210.0f)};
+      DrawRectangle((int)COLUMN_TO_X(col), (int)ROW_TO_Y(row),
+                    (int)SQUARE_SIZE, (int)SQUARE_SIZE, flash);
+    }
+  }
+}
+
+// Rotate-and-fade confetti rectangles
+static void DrawConfetti(WinAnimation *anim) {
+  if (!anim->active) return;
+
+  for (int i = 0; i < MAX_PARTICLES; i++) {
+    Particle *p = &anim->particles[i];
+    if (p->life <= 0.0f) continue;
+
+    // Fade alpha out in the final 25 % of each particle's life
+    float lifeRatio = p->life / p->maxLife;
+    unsigned char alpha = (lifeRatio < 0.25f)
+                              ? (unsigned char)(lifeRatio / 0.25f * 255.0f)
+                              : 255;
+    Color c = {p->color.r, p->color.g, p->color.b, alpha};
+
+    Rectangle rect   = {p->pos.x, p->pos.y, p->w, p->h};
+    Vector2   origin = {p->w / 2.0f, p->h / 2.0f};
+    DrawRectanglePro(rect, origin, p->rot, c);
+  }
+}
+
+// ─── Main ───────────────────────────────────────────────────────────────────
 
 int main(void) {
   SetTraceLogLevel(LOG_WARNING);
@@ -109,23 +274,24 @@ void DrawPauseScreen(Font pauseFont, Font subtitleFont) {
   DrawTextEx(subtitleFont, instructText, (Vector2){instructTextX, instructTextY}, WIN_SUBTITLE_SIZE, 0, CORRECT_CELL_COLOR);
 }
 
-void DrawWinningScreen(Font winFont, Font subtitleFont, float completionTime, int difficulty) {
-  // Semi-transparent overlay
-  DrawRectangle(0, 0, WIDTH, HEIGHT, WIN_BACKGROUND);
+// alpha: 0.0 (fully transparent) → 1.0 (fully opaque). Used for fade-in.
+void DrawWinningScreen(Font winFont, Font subtitleFont, Font instructFont, float completionTime, int difficulty, float alpha) {
+  // Semi-transparent darkening overlay, faded in
+  DrawRectangle(0, 0, WIDTH, HEIGHT, Fade((Color){0, 0, 0, 180}, alpha));
 
   // Main congratulations text
   const char *winText = "CONGRATULATIONS!";
   Vector2 winTextSize = MeasureTextEx(winFont, winText, WIN_FONT_SIZE, 0);
   float winTextX = (WIDTH - winTextSize.x) / 2.0f;
   float winTextY = HEIGHT / 3.0f;
-  DrawTextEx(winFont, winText, (Vector2){winTextX, winTextY}, WIN_FONT_SIZE, 0, WIN_COLOR);
+  DrawTextEx(winFont, winText, (Vector2){winTextX, winTextY}, WIN_FONT_SIZE, 0, Fade(WIN_COLOR, alpha));
 
   // Completion message
   const char *completeText = "Puzzle Solved!";
   Vector2 completeTextSize = MeasureTextEx(subtitleFont, completeText, WIN_SUBTITLE_SIZE, 0);
   float completeTextX = (WIDTH - completeTextSize.x) / 2.0f;
   float completeTextY = winTextY + winTextSize.y + 20;
-  DrawTextEx(subtitleFont, completeText, (Vector2){completeTextX, completeTextY}, WIN_SUBTITLE_SIZE, 0, CORRECT_CELL_COLOR);
+  DrawTextEx(subtitleFont, completeText, (Vector2){completeTextX, completeTextY}, WIN_SUBTITLE_SIZE, 0, Fade(CORRECT_CELL_COLOR, alpha));
 
   // Time and difficulty info
   int hours = (int)completionTime / 3600;
@@ -135,30 +301,31 @@ void DrawWinningScreen(Font winFont, Font subtitleFont, float completionTime, in
   Vector2 timeTextSize = MeasureTextEx(subtitleFont, timeText, WIN_SUBTITLE_SIZE, 0);
   float timeTextX = (WIDTH - timeTextSize.x) / 2.0f;
   float timeTextY = completeTextY + completeTextSize.y + 15;
-  DrawTextEx(subtitleFont, timeText, (Vector2){timeTextX, timeTextY}, WIN_SUBTITLE_SIZE, 0, CORRECT_CELL_COLOR);
+  DrawTextEx(subtitleFont, timeText, (Vector2){timeTextX, timeTextY}, WIN_SUBTITLE_SIZE, 0, Fade(CORRECT_CELL_COLOR, alpha));
 
   const char *diffText = TextFormat("Difficulty: %s", getDiffFromInt(difficulty));
   Vector2 diffTextSize = MeasureTextEx(subtitleFont, diffText, WIN_SUBTITLE_SIZE, 0);
   float diffTextX = (WIDTH - diffTextSize.x) / 2.0f;
   float diffTextY = timeTextY + timeTextSize.y + 15;
-  DrawTextEx(subtitleFont, diffText, (Vector2){diffTextX, diffTextY}, WIN_SUBTITLE_SIZE, 0, CORRECT_CELL_COLOR);
+  DrawTextEx(subtitleFont, diffText, (Vector2){diffTextX, diffTextY}, WIN_SUBTITLE_SIZE, 0, Fade(CORRECT_CELL_COLOR, alpha));
 
   // Instructions
   const char *instructText = "Press ENTER for new puzzle or ESC to exit";
-  Vector2 instructTextSize = MeasureTextEx(subtitleFont, instructText, WIN_SUBTITLE_SIZE - 10, 0);
+  Vector2 instructTextSize = MeasureTextEx(instructFont, instructText, WIN_INSTRUCTION_SIZE, 0);
   float instructTextX = (WIDTH - instructTextSize.x) / 2.0f;
   float instructTextY = diffTextY + diffTextSize.y + 40;
-  DrawTextEx(subtitleFont, instructText, (Vector2){instructTextX, instructTextY}, WIN_SUBTITLE_SIZE - 10, 0, GIVEN_CELL_COLOR);
+  DrawTextEx(instructFont, instructText, (Vector2){instructTextX, instructTextY}, WIN_INSTRUCTION_SIZE, 0, Fade(GIVEN_CELL_COLOR, alpha));
 }
 
 void render(void) {
   Board board = {.selectedNumber = -1};
-  Font numberFont = LoadFontEx("DroidSans.ttf", NUMBER_FONT_SIZE, NULL, 0);
-  Font pencilFont = LoadFontEx("DroidSans.ttf", PENCIL_NUMBER_FONT_SIZE, NULL, 0);
-  Font timeFont = LoadFontEx("DroidSans.ttf", TIME_FONT_SIZE, NULL, 0);
-  Font textFont = LoadFontEx("DroidSans.ttf", TEXT_FONT_SIZE, NULL, 0);
-  Font winFont = LoadFontEx("DroidSans.ttf", WIN_FONT_SIZE, NULL, 0);
+  Font numberFont   = LoadFontEx("DroidSans.ttf", NUMBER_FONT_SIZE, NULL, 0);
+  Font pencilFont   = LoadFontEx("DroidSans.ttf", PENCIL_NUMBER_FONT_SIZE, NULL, 0);
+  Font timeFont     = LoadFontEx("DroidSans.ttf", TIME_FONT_SIZE, NULL, 0);
+  Font textFont     = LoadFontEx("DroidSans.ttf", TEXT_FONT_SIZE, NULL, 0);
+  Font winFont      = LoadFontEx("DroidSans.ttf", WIN_FONT_SIZE, NULL, 0);
   Font subtitleFont = LoadFontEx("DroidSans.ttf", WIN_SUBTITLE_SIZE, NULL, 0);
+  Font instructFont = LoadFontEx("DroidSans.ttf", WIN_INSTRUCTION_SIZE, NULL, 0);
 
   bool pencilMode = false;
   float time = 0.0;
@@ -168,13 +335,19 @@ void render(void) {
   bool isWindowFocused = true;
   MoveStack undoStack = {0};
   MoveStack redoStack = {0};
+  WinAnimation winAnim = {0};
 
   while (!WindowShouldClose()) {
+    float dt = GetFrameTime();
+
     // Check if window focus changed
     bool currentlyFocused = IsWindowFocused();
     if (currentlyFocused != isWindowFocused) {
       isWindowFocused = currentlyFocused;
     }
+
+    // Advance the win animation before drawing
+    UpdateWinAnimation(&winAnim, dt);
 
     BeginDrawing();
     ClearBackground(BACKGROUND_COLOR);
@@ -186,6 +359,7 @@ void render(void) {
       completionTime = 0.0;
       undoStack.top = 0; // clear undo/redo history on new puzzle
       redoStack.top = 0;
+      winAnim.active = false; // reset animation for the new puzzle
     }
 
     if (GetKeyPressed() == KEY_ESCAPE && puzzleCompleted) {
@@ -266,6 +440,7 @@ void render(void) {
                 if (IsPuzzleComplete(&board)) {
                   puzzleCompleted = true;
                   completionTime = time;
+                  InitWinAnimation(&winAnim); // kick off the win animation
                 }
               }
             }
@@ -329,9 +504,16 @@ void render(void) {
       }
     }
 
+    // ── Win animation layers ──────────────────────────────────────────────
+    // 1. Gold ripple flash on each cell (drawn above numbers, below confetti)
+    DrawCellFlashes(&winAnim);
+    // 2. Confetti rain (drawn above grid, below the darkened overlay)
+    DrawConfetti(&winAnim);
+    // ─────────────────────────────────────────────────────────────────────
+
     {
       if (isWindowFocused && !puzzleCompleted) {
-        time += GetFrameTime();
+        time += dt;
       }
       int hours = (int)time / 3600;
       int minutes = ((int)time % 3600) / 60;
@@ -358,9 +540,9 @@ void render(void) {
       DrawTextEx(textFont, text, (Vector2){rec.x + ((rec.width - measure.x) / 2.0), rec.y}, TEXT_FONT_SIZE, 0, CORRECT_CELL_COLOR);
     }
 
-    // Draw winning screen if puzzle is completed
+    // Draw winning screen if puzzle is completed (overlay fades in via winAnim.overlayAlpha)
     if (puzzleCompleted) {
-      DrawWinningScreen(winFont, subtitleFont, completionTime, difficulty);
+      DrawWinningScreen(winFont, subtitleFont, instructFont, completionTime, difficulty, winAnim.overlayAlpha);
     }
     // Draw pause screen if window is not focused and puzzle is not completed
     else if (!isWindowFocused) {

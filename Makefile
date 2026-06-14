@@ -13,7 +13,7 @@ DEPS=$(patsubst $(SRCDIR)/%.c, $(DEPDIR)/%.d, $(SRCS))
 BIN=$(BINDIR)/sudoku
 CFLAGS=-std=c99 -Wpedantic -Wextra -Wall -Wshadow -Wpointer-arith -Wcast-qual -Wstrict-prototypes -Wmissing-prototypes -Wno-unused-parameter  -O3 -Wno-format-overflow
 DEPFLAGS=-MT $@ -MMD -MP -MF $(DEPDIR)/$*.d
-LDFLAGS=-lraylib 
+LDFLAGS=-lraylib -lm
 PREFIX=/usr
 .PHONY: all clean run
 
