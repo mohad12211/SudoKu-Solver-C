@@ -3,6 +3,31 @@
 #include <stdbool.h>
 #include <string.h>
 
+#define MOVE_STACK_MAX 1024
+
+typedef struct {
+  int row;
+  int column;
+  Cell cell; // snapshot of the cell state
+} MoveEntry;
+
+typedef struct {
+  MoveEntry entries[MOVE_STACK_MAX];
+  int top; // index of next free slot (0 = empty)
+} MoveStack;
+
+static void MoveStackPush(MoveStack *s, int row, int column, Cell cell) {
+  if (s->top < MOVE_STACK_MAX) {
+    s->entries[s->top++] = (MoveEntry){row, column, cell};
+  }
+}
+
+static bool MoveStackPop(MoveStack *s, MoveEntry *out) {
+  if (s->top == 0) return false;
+  *out = s->entries[--s->top];
+  return true;
+}
+
 #define WIDTH 1150
 #define HEIGHT 800
 
@@ -141,6 +166,8 @@ void render(void) {
   bool puzzleCompleted = false;
   float completionTime = 0.0;
   bool isWindowFocused = true;
+  MoveStack undoStack = {0};
+  MoveStack redoStack = {0};
 
   while (!WindowShouldClose()) {
     // Check if window focus changed
@@ -157,6 +184,8 @@ void render(void) {
       time = 0;
       puzzleCompleted = false;
       completionTime = 0.0;
+      undoStack.top = 0; // clear undo/redo history on new puzzle
+      redoStack.top = 0;
     }
 
     if (GetKeyPressed() == KEY_ESCAPE && puzzleCompleted) {
@@ -164,6 +193,28 @@ void render(void) {
     }
 
     if (!puzzleCompleted && isWindowFocused) {
+      // Undo: Ctrl+Z
+      if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_Z)) {
+        MoveEntry entry;
+        if (MoveStackPop(&undoStack, &entry)) {
+          // Save current state to redo stack before restoring
+          MoveStackPush(&redoStack, entry.row, entry.column,
+                        board.cells[entry.row][entry.column]);
+          board.cells[entry.row][entry.column] = entry.cell;
+        }
+      }
+
+      // Redo: Ctrl+Y
+      if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_Y)) {
+        MoveEntry entry;
+        if (MoveStackPop(&redoStack, &entry)) {
+          // Save current state to undo stack before re-applying
+          MoveStackPush(&undoStack, entry.row, entry.column,
+                        board.cells[entry.row][entry.column]);
+          board.cells[entry.row][entry.column] = entry.cell;
+        }
+      }
+
       // Update selected cell.
       if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         int selectedColumn = X_TO_COLUMN(GetMouseX());
@@ -179,10 +230,16 @@ void render(void) {
             if (selectedColumn >= 0 && selectedColumn <= 8 && selectedRow >= 0 && selectedRow <= 8) {
               Cell *cell = &board.cells[selectedRow][selectedColumn];
               if (pencilMode) {
+                redoStack.top = 0; // new action clears redo history
+                MoveStackPush(&undoStack, selectedRow, selectedColumn, *cell);
                 cell->pencilMarks[board.selectedNumber - 1] = !cell->pencilMarks[board.selectedNumber - 1];
               } else if (cell->number && !cell->given) {
+                redoStack.top = 0; // new action clears redo history
+                MoveStackPush(&undoStack, selectedRow, selectedColumn, *cell);
                 cell->number = 0;
               } else if (!cell->given) {
+                redoStack.top = 0; // new action clears redo history
+                MoveStackPush(&undoStack, selectedRow, selectedColumn, *cell);
                 cell->number = board.selectedNumber;
                 bool isCorrect = cell->number == board.solution[selectedRow][selectedColumn];
                 if (isCorrect) {
