@@ -13,5 +13,7 @@ bool solveRecursive(int board[9][9], int startRow, int startColumn);
 bool isValid(int board[9][9]);
 bool getNextEmptyCell(int board[9][9], int *currentRow, int *currentColumn);
 bool IsPuzzleComplete(Board *board);
-void DrawWinningScreen(Font winFont, Font subtitleFont, Font instructFont, float completionTime, int difficulty, float alpha);
+void DrawWinningScreen(Font winFont, Font subtitleFont, Font instructFont, float completionTime, int difficulty, float alpha, bool newRecord);
+void LoadBestTimes(float bestTimes[6]);
+void SaveBestTimes(float bestTimes[6]);
 void DrawPauseScreen(Font pauseFont, Font subtitleFont);
