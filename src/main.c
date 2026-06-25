@@ -12,24 +12,33 @@
 typedef struct {
   int row;
   int column;
-  Cell cell; // snapshot of the cell state
+  Cell cell;    // snapshot of the cell state
+  int groupId;  // entries with the same groupId are undone/redone together
 } MoveEntry;
 
 typedef struct {
   MoveEntry entries[MOVE_STACK_MAX];
-  int top; // index of next free slot (0 = empty)
+  int top;     // index of next free slot (0 = empty)
+  int nextGroup; // monotonically increasing group counter
 } MoveStack;
 
-static void MoveStackPush(MoveStack *s, int row, int column, Cell cell) {
+static void MoveStackPush(MoveStack *s, int row, int column, Cell cell, int groupId) {
   if (s->top < MOVE_STACK_MAX) {
-    s->entries[s->top++] = (MoveEntry){row, column, cell};
+    s->entries[s->top++] = (MoveEntry){row, column, cell, groupId};
   }
 }
 
-static bool MoveStackPop(MoveStack *s, MoveEntry *out) {
+// Pops all entries belonging to the same group as the top entry.
+// Returns false if the stack is empty.
+// The caller should process all returned entries (they share the same groupId).
+static bool MoveStackPopGroup(MoveStack *s, MoveEntry out[], int *count) {
   if (s->top == 0)
     return false;
-  *out = s->entries[--s->top];
+  int gid = s->entries[s->top - 1].groupId;
+  *count = 0;
+  while (s->top > 0 && s->entries[s->top - 1].groupId == gid) {
+    out[(*count)++] = s->entries[--s->top];
+  }
   return true;
 }
 
@@ -447,7 +456,7 @@ void render(void) {
     ClearBackground(BACKGROUND_COLOR);
 
     if (GetKeyPressed() == KEY_ENTER) {
-      setNewBoard(&board, difficulty + 5);
+      setNewBoard(&board, difficulty + 4);
       time = 0;
       puzzleCompleted = false;
       completionTime = 0.0;
@@ -463,21 +472,37 @@ void render(void) {
     if (!puzzleCompleted && isWindowFocused) {
       // Undo: Ctrl+Z
       if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_Z)) {
-        MoveEntry entry;
-        if (MoveStackPop(&undoStack, &entry)) {
-          // Save current state to redo stack before restoring
-          MoveStackPush(&redoStack, entry.row, entry.column, board.cells[entry.row][entry.column]);
-          board.cells[entry.row][entry.column] = entry.cell;
+        MoveEntry group[MOVE_STACK_MAX];
+        int count = 0;
+        if (MoveStackPopGroup(&undoStack, group, &count)) {
+          // Push current states to redo stack (same group id, reversed order)
+          int redoGid = redoStack.nextGroup++;
+          for (int gi = count - 1; gi >= 0; gi--) {
+            MoveStackPush(&redoStack, group[gi].row, group[gi].column,
+                          board.cells[group[gi].row][group[gi].column], redoGid);
+          }
+          // Restore all cells in the group
+          for (int gi = 0; gi < count; gi++) {
+            board.cells[group[gi].row][group[gi].column] = group[gi].cell;
+          }
         }
       }
 
       // Redo: Ctrl+Y
       if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_Y)) {
-        MoveEntry entry;
-        if (MoveStackPop(&redoStack, &entry)) {
-          // Save current state to undo stack before re-applying
-          MoveStackPush(&undoStack, entry.row, entry.column, board.cells[entry.row][entry.column]);
-          board.cells[entry.row][entry.column] = entry.cell;
+        MoveEntry group[MOVE_STACK_MAX];
+        int count = 0;
+        if (MoveStackPopGroup(&redoStack, group, &count)) {
+          // Push current states to undo stack (same group id, reversed order)
+          int undoGid = undoStack.nextGroup++;
+          for (int gi = count - 1; gi >= 0; gi--) {
+            MoveStackPush(&undoStack, group[gi].row, group[gi].column,
+                          board.cells[group[gi].row][group[gi].column], undoGid);
+          }
+          // Re-apply all cells in the group
+          for (int gi = 0; gi < count; gi++) {
+            board.cells[group[gi].row][group[gi].column] = group[gi].cell;
+          }
         }
       }
 
@@ -497,33 +522,68 @@ void render(void) {
               Cell *cell = &board.cells[selectedRow][selectedColumn];
               if (pencilMode) {
                 redoStack.top = 0; // new action clears redo history
-                MoveStackPush(&undoStack, selectedRow, selectedColumn, *cell);
+                MoveStackPush(&undoStack, selectedRow, selectedColumn, *cell, undoStack.nextGroup++);
                 cell->pencilMarks[board.selectedNumber - 1] = !cell->pencilMarks[board.selectedNumber - 1];
               } else if (cell->number && !cell->given) {
                 redoStack.top = 0; // new action clears redo history
-                MoveStackPush(&undoStack, selectedRow, selectedColumn, *cell);
+                MoveStackPush(&undoStack, selectedRow, selectedColumn, *cell, undoStack.nextGroup++);
                 cell->number = 0;
               } else if (!cell->given) {
                 redoStack.top = 0; // new action clears redo history
-                MoveStackPush(&undoStack, selectedRow, selectedColumn, *cell);
-                cell->number = board.selectedNumber;
-                bool isCorrect = cell->number == board.solution[selectedRow][selectedColumn];
+                // Assign one group id for this entire placement (number + pencil erasures)
+                int gid = undoStack.nextGroup++;
+                bool isCorrect = board.selectedNumber == board.solution[selectedRow][selectedColumn];
+                // Save pencil-marked cells that will be erased (push them first so the
+                // placed-number cell is on top and popped last, maintaining order).
                 if (isCorrect) {
+                  // Use a small boolean grid to avoid double-pushing the same cell
+                  bool pushed[9][9] = {{false}};
+                  // Same column
                   for (int row = 0; row < 9; row++) {
-                    if (board.cells[row][selectedColumn].pencilMarks[board.selectedNumber - 1]) {
-                      board.cells[row][selectedColumn].pencilMarks[board.selectedNumber - 1] = false;
+                    if (row != selectedRow &&
+                        board.cells[row][selectedColumn].pencilMarks[board.selectedNumber - 1]) {
+                      MoveStackPush(&undoStack, row, selectedColumn,
+                                    board.cells[row][selectedColumn], gid);
+                      pushed[row][selectedColumn] = true;
                     }
                   }
-                  for (int column = 0; column < 9; column++) {
-                    if (board.cells[selectedRow][column].pencilMarks[board.selectedNumber - 1]) {
-                      board.cells[selectedRow][column].pencilMarks[board.selectedNumber - 1] = false;
+                  // Same row
+                  for (int col = 0; col < 9; col++) {
+                    if (col != selectedColumn &&
+                        board.cells[selectedRow][col].pencilMarks[board.selectedNumber - 1] &&
+                        !pushed[selectedRow][col]) {
+                      MoveStackPush(&undoStack, selectedRow, col,
+                                    board.cells[selectedRow][col], gid);
+                      pushed[selectedRow][col] = true;
                     }
+                  }
+                  // Same 3x3 box
+                  for (int subrow = (selectedRow / 3) * 3; subrow < (selectedRow / 3) * 3 + 3; subrow++) {
+                    for (int subcol = (selectedColumn / 3) * 3; subcol < (selectedColumn / 3) * 3 + 3; subcol++) {
+                      if ((subrow != selectedRow || subcol != selectedColumn) &&
+                          board.cells[subrow][subcol].pencilMarks[board.selectedNumber - 1] &&
+                          !pushed[subrow][subcol]) {
+                        MoveStackPush(&undoStack, subrow, subcol,
+                                      board.cells[subrow][subcol], gid);
+                        pushed[subrow][subcol] = true;
+                      }
+                    }
+                  }
+                }
+                // Save the target cell itself (placed last = popped first on undo)
+                MoveStackPush(&undoStack, selectedRow, selectedColumn, *cell, gid);
+                // Now apply the changes
+                cell->number = board.selectedNumber;
+                if (isCorrect) {
+                  for (int row = 0; row < 9; row++) {
+                    board.cells[row][selectedColumn].pencilMarks[board.selectedNumber - 1] = false;
+                  }
+                  for (int column = 0; column < 9; column++) {
+                    board.cells[selectedRow][column].pencilMarks[board.selectedNumber - 1] = false;
                   }
                   for (int subcolumn = (selectedColumn / 3) * 3; subcolumn < (selectedColumn / 3) * 3 + 3; subcolumn++) {
                     for (int subrow = (selectedRow / 3) * 3; subrow < (selectedRow / 3) * 3 + 3; subrow++) {
-                      if (board.cells[subrow][subcolumn].pencilMarks[board.selectedNumber - 1]) {
-                        board.cells[subrow][subcolumn].pencilMarks[board.selectedNumber - 1] = false;
-                      }
+                      board.cells[subrow][subcolumn].pencilMarks[board.selectedNumber - 1] = false;
                     }
                   }
                 }
