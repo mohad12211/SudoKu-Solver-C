@@ -488,6 +488,18 @@ void render(void) {
         }
       }
 
+      // Copy board string: Ctrl+C
+      if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_C)) {
+        char boardStr[82];
+        for (int row = 0; row < 9; row++) {
+          for (int col = 0; col < 9; col++) {
+            boardStr[row * 9 + col] = '0' + board.cells[row][col].number;
+          }
+        }
+        boardStr[81] = '\0';
+        SetClipboardText(boardStr);
+      }
+
       // Redo: Ctrl+Y
       if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_Y)) {
         MoveEntry group[MOVE_STACK_MAX];
